@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/mesg-sender-core",
+    "crates/email-sender",
+    "crates/sms-sender",
+]
+resolver = "2"
