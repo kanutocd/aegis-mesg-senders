@@ -56,9 +56,15 @@ fn required(name: &str) -> String {
 }
 
 fn sms() -> SmsMessage {
+    let sender = std::env::var("AEGIS_SMS_FROM").unwrap_or_else(|_| "AEGIS".into());
+    let sender = if sender.starts_with('+') {
+        Sender::Phone(PhoneNumber::new(sender).unwrap())
+    } else {
+        Sender::Alphanumeric(sender)
+    };
     SmsMessage::new(
         PhoneNumber::new(required("AEGIS_SMS_TO")).unwrap(),
-        Sender::Alphanumeric(std::env::var("AEGIS_SMS_FROM").unwrap_or_else(|_| "AEGIS".into())),
+        sender,
         "Aegis live SMS integration test",
     )
     .unwrap()
@@ -87,8 +93,14 @@ fn textbee_live() {
 #[test]
 #[ignore = "sends a real SMS; run explicitly with --features live-tests -- --ignored"]
 fn infobip_live() {
-    let endpoint = std::env::var("AEGIS_INFOBIP_ENDPOINT")
-        .unwrap_or_else(|_| "https://api.infobip.com/sms/3/messages".into());
+    let endpoint = std::env::var("AEGIS_INFOBIP_ENDPOINT").unwrap_or_else(|_| {
+        format!(
+            "{}/sms/3/messages",
+            std::env::var("AEGIS_INFOBIP_BASE_URL")
+                .unwrap_or_else(|_| "https://api.infobip.com".into())
+                .trim_end_matches('/')
+        )
+    });
     let provider = Infobip {
         transport: Arc::new(UreqTransport::new()),
         endpoint,

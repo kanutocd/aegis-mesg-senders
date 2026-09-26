@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Made SMS live tests accept E.164 sender numbers and regional Infobip base URLs.
 - Added the JSON content type header required by TextBee live sends.
 - Included safe structured provider messages in SMS HTTP error diagnostics.
 - Aligned Infobip request construction with the Ruby adapter and added
