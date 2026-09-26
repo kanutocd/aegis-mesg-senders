@@ -258,11 +258,22 @@ fn provider_response(
         )
     })?;
     if !(200..300).contains(&response.status) {
+        let kind = match response.status {
+            401 | 403 => ErrorKind::Authentication,
+            408 => ErrorKind::Timeout,
+            429 => ErrorKind::RateLimited,
+            400..=499 => ErrorKind::InvalidRequest,
+            500..=599 => ErrorKind::Unavailable,
+            _ => ErrorKind::Unknown,
+        };
         return Err(ProviderError::new(
-            ErrorKind::Unavailable,
+            kind,
             format!("{provider} returned HTTP {}", response.status),
-            response.status == 429 || response.status >= 500,
-            true,
+            matches!(
+                kind,
+                ErrorKind::RateLimited | ErrorKind::Timeout | ErrorKind::Unavailable
+            ),
+            !matches!(kind, ErrorKind::InvalidRequest | ErrorKind::Authentication),
         ));
     }
     let value: serde_json::Value = serde_json::from_slice(&response.body).map_err(|_| {

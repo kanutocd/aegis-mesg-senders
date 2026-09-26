@@ -38,8 +38,13 @@ impl HttpTransport for UreqTransport {
                     .map_err(|_| TransportError("response read failed".into()))?;
                 Ok(HttpResponse { status, body })
             }
-            Err(ureq::Error::Status(status, _)) => {
-                Err(TransportError(format!("provider returned HTTP {status}")))
+            Err(ureq::Error::Status(status, response)) => {
+                let mut body = Vec::new();
+                response
+                    .into_reader()
+                    .read_to_end(&mut body)
+                    .map_err(|_| TransportError("error response read failed".into()))?;
+                Ok(HttpResponse { status, body })
             }
             Err(_) => Err(TransportError("provider request failed".into())),
         }
@@ -71,7 +76,12 @@ fn textbee_live() {
         device_id: std::env::var("AEGIS_TEXTBEE_DEVICE_ID").unwrap_or_default(),
     };
     let request = to_delivery_request(&sms(), &MessageId::new("live-textbee").unwrap()).unwrap();
-    provider.send(&request).expect("TextBee accepted live SMS");
+    provider.send(&request).unwrap_or_else(|error| {
+        panic!(
+            "TextBee rejected live SMS: kind={:?}, message={}",
+            error.kind, error.message
+        )
+    });
 }
 
 #[test]
