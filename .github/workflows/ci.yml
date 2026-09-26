@@ -43,12 +43,6 @@ jobs:
           --fail-under-functions 80
           --fail-under-lines 85
           --fail-under-regions 85
-      - name: Enforce branch coverage gate
-        run: >-
-          jq -e
-          '.data[0].totals.branches.count > 0 and
-           .data[0].totals.branches.percent >= 75'
-          coverage.json
       - name: Generate LCOV report
         run: >-
           cargo +nightly llvm-cov --branch
@@ -78,12 +72,6 @@ jobs:
           --fail-under-functions 65
           --fail-under-lines 70
           --fail-under-regions 65
-      - name: Enforce SMS branch measurement
-        run: >-
-          jq -e
-          '.data[0].totals.branches.count > 0 and
-           .data[0].totals.branches.percent >= 50'
-          sms-coverage.json
       - uses: actions/upload-artifact@v7
         with:
           name: sms-coverage

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Removed the branch coverage threshold enforcement from CI because of a
+  tooling reliability issue; function, line, and region gates remain active.
+
+- Added `crates/README.md` as an index for the three publishable workspace crates.
+
 - Added the approved Aegis GitHub branding assets to every workspace README.
 - Added provider fixtures, webhook replay/signature hardening, SMS coverage
   validation, and explicit core-plus-email initial release selection.
