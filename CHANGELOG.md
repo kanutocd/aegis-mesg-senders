@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added an opt-in live provider test harness for Resend, Mailgun, Mailpit,
+  TextBee, and Infobip, plus a pinned Docker Compose Mailpit service.
 - Removed the branch coverage threshold enforcement from CI because of a
   tooling reliability issue; function, line, and region gates remain active.
 - Removed branch instrumentation from the SMS coverage job because it changes

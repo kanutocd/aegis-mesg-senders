@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added ignored, credential-gated live tests for Resend, Mailgun, and Mailpit.
 - Added the approved Aegis GitHub avatar to the crate README.
 - Added provider response fixtures, Mailgun replay protection, application
   message-ID extraction, and Resend/Svix signature verification.

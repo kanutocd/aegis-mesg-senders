@@ -20,3 +20,7 @@ Adapters accept an injected [`HttpTransport`](src/lib.rs), so applications can
 use their preferred synchronous HTTP client and tests can use deterministic
 fixtures. Submission returns provider acceptance; webhook receipts are mapped
 separately with `normalize_receipt`.
+
+For credential-gated live checks, run the workspace Mailpit service with
+`docker compose -f ../../docker-compose.mailpit.yml up -d`, or run the ignored
+Resend/Mailgun/Mailpit harness from the workspace README.

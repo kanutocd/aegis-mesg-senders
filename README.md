@@ -18,7 +18,7 @@ for the gateway's messaging needs.
 
 They are now maintained as reusable public crates so other Rust projects can
 share the same delivery contracts and provider integrations. For example,
-<font size="+1">**ᜎᜓ**</font> **Lunsaran**, the multi-organization resumable uploads and workflows project,
+<font size="+1">**ᜎᜓ**</font> **Lunsaran**, the multi-organization resumable uploads and workflows platform,
 can use these crates without copying or reimplementing the messaging layer.
 
 The project was intentionally moved from private, application-specific code
