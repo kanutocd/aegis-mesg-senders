@@ -23,6 +23,57 @@ pub trait DeliveryCodec: Send + Sync {
     fn decode(&self, bytes: &[u8]) -> Option<Delivery>;
 }
 
+/// JSON codec for the normalized delivery model.
+#[cfg(feature = "redis")]
+#[derive(Default)]
+pub struct JsonDeliveryCodec;
+
+#[cfg(feature = "redis")]
+impl DeliveryCodec for JsonDeliveryCodec {
+    fn encode(&self, delivery: &Delivery) -> Vec<u8> {
+        serde_json::to_vec(delivery).expect("Delivery is JSON serializable")
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Option<Delivery> {
+        serde_json::from_slice(bytes).ok()
+    }
+}
+
+/// Synchronous Redis backend using the official `redis` client.
+#[cfg(feature = "redis")]
+pub struct RedisClientBackend {
+    client: redis::Client,
+}
+
+#[cfg(feature = "redis")]
+impl RedisClientBackend {
+    /// Creates a backend from a Redis URL.
+    pub fn open(url: &str) -> redis::RedisResult<Self> {
+        Ok(Self {
+            client: redis::Client::open(url)?,
+        })
+    }
+}
+
+#[cfg(feature = "redis")]
+impl RedisBackend for RedisClientBackend {
+    fn get(&self, key: &str) -> Option<Vec<u8>> {
+        use redis::Commands;
+        self.client
+            .get_connection()
+            .ok()
+            .and_then(|mut connection| connection.get(key).ok())
+    }
+
+    fn set(&self, key: &str, value: Vec<u8>, ttl_ms: u64) {
+        use redis::Commands;
+        if let Ok(mut connection) = self.client.get_connection() {
+            let ttl_seconds = ttl_ms.div_ceil(1_000).max(1);
+            let _: redis::RedisResult<()> = connection.set_ex(key, value, ttl_seconds);
+        }
+    }
+}
+
 /// A Redis-compatible state store using injected backend and serialization.
 #[cfg(feature = "redis")]
 pub struct RedisStateStore<B, C> {
@@ -111,6 +162,25 @@ where
     }
 }
 
+/// Observer that emits safe delivery fields through the `tracing` facade.
+#[cfg(feature = "telemetry")]
+#[derive(Default)]
+pub struct TracingObserver;
+
+#[cfg(feature = "telemetry")]
+impl Observer for TracingObserver {
+    fn observe(&self, event: DeliveryEvent) {
+        tracing::info!(
+            message_id = %event.message_id,
+            recipient = %event.recipient,
+            provider = %event.provider,
+            event = ?event.kind,
+            provider_message_id = ?event.provider_message_id,
+            "delivery state changed"
+        );
+    }
+}
+
 #[cfg(all(test, feature = "redis", feature = "telemetry"))]
 mod tests {
     use super::*;
@@ -141,6 +211,7 @@ mod tests {
         fn decode(&self, bytes: &[u8]) -> Option<Delivery> {
             Some(Delivery {
                 message_id: MessageId::new("decoded").unwrap(),
+                recipient: String::from("a***t"),
                 provider: String::from_utf8(bytes.to_vec()).ok()?,
                 status: DeliveryStatus::Accepted,
                 provider_message_id: Some(String::from("provider-id")),
@@ -166,6 +237,7 @@ mod tests {
     fn delivery() -> Delivery {
         Delivery {
             message_id: MessageId::new("message").unwrap(),
+            recipient: String::from("a***t"),
             provider: String::from("provider"),
             status: DeliveryStatus::Accepted,
             provider_message_id: Some(String::from("provider-id")),

@@ -28,6 +28,7 @@ pub enum Channel {
 
 /// An opaque message identifier supplied by the caller.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "redis", derive(serde::Serialize, serde::Deserialize))]
 pub struct MessageId(String);
 
 impl MessageId {
@@ -249,6 +250,7 @@ pub struct ProviderResponse {
 
 /// Error categories normalized by the runtime.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "redis", derive(serde::Serialize, serde::Deserialize))]
 pub enum ErrorKind {
     /// Credentials or authentication were rejected.
     Authentication,
@@ -379,6 +381,7 @@ impl std::error::Error for ValidationError {}
 
 /// Normalized delivery state.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "redis", derive(serde::Serialize, serde::Deserialize))]
 pub enum DeliveryStatus {
     /// The provider accepted the submission.
     Accepted,
@@ -390,9 +393,12 @@ pub enum DeliveryStatus {
 
 /// The durable normalized result of a delivery attempt.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "redis", derive(serde::Serialize, serde::Deserialize))]
 pub struct Delivery {
     /// Caller message identifier.
     pub message_id: MessageId,
+    /// Redacted recipient retained for subsequent receipt events.
+    pub recipient: String,
     /// Selected provider instance.
     pub provider: String,
     /// Current normalized state.
@@ -403,8 +409,52 @@ pub struct Delivery {
     pub attempts: Vec<Attempt>,
 }
 
+/// A provider receipt that advances a persisted delivery.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeliveryReceipt {
+    /// Caller message identifier.
+    pub message_id: MessageId,
+    /// Provider instance that produced the receipt.
+    pub provider: String,
+    /// Provider correlation identifier.
+    pub provider_message_id: String,
+    /// Normalized terminal state.
+    pub status: DeliveryStatus,
+}
+
+impl DeliveryReceipt {
+    /// Creates a receipt, rejecting empty provider identifiers.
+    pub fn new(
+        message_id: MessageId,
+        provider: impl Into<String>,
+        provider_message_id: impl Into<String>,
+        status: DeliveryStatus,
+    ) -> Result<Self, ValidationError> {
+        let provider = provider.into();
+        let provider_message_id = provider_message_id.into();
+        if provider.trim().is_empty() {
+            return Err(ValidationError::Empty("receipt provider"));
+        }
+        if provider_message_id.trim().is_empty() {
+            return Err(ValidationError::Empty("provider message id"));
+        }
+        if status == DeliveryStatus::Accepted {
+            return Err(ValidationError::InvalidPolicy(
+                "receipts must be terminal delivery states",
+            ));
+        }
+        Ok(Self {
+            message_id,
+            provider,
+            provider_message_id,
+            status,
+        })
+    }
+}
+
 /// A single provider attempt.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "redis", derive(serde::Serialize, serde::Deserialize))]
 pub struct Attempt {
     /// Provider instance name.
     pub provider: String,
@@ -792,7 +842,12 @@ impl Router {
         let now = self.clock.now_ms();
         let candidates = self.elect(&request, now)?;
         let mut attempts = Vec::new();
-        for name in candidates.into_iter().take(self.policy.max_attempts) {
+        let mut candidates: VecDeque<(String, bool)> =
+            candidates.into_iter().map(|name| (name, false)).collect();
+        while attempts.len() < self.policy.max_attempts {
+            let Some((name, retried)) = candidates.pop_front() else {
+                break;
+            };
             let providers = self
                 .registry
                 .providers
@@ -826,6 +881,7 @@ impl Router {
                     });
                     let delivery = Delivery {
                         message_id: request.message.id.clone(),
+                        recipient: request.message.recipient.redacted(),
                         provider: registered.config.name.clone(),
                         status: DeliveryStatus::Accepted,
                         provider_message_id: Some(response.provider_message_id.clone()),
@@ -859,6 +915,10 @@ impl Router {
                         accepted: false,
                         error: Some(kind),
                     });
+                    if error.retryable && !retried && attempts.len() < self.policy.max_attempts {
+                        candidates.push_front((name, true));
+                        continue;
+                    }
                     if !should_failover {
                         return Err(RouteError::Provider { error, attempts });
                     }
@@ -866,6 +926,40 @@ impl Router {
             }
         }
         Err(RouteError::NoProvider { attempts })
+    }
+
+    /// Applies a terminal provider receipt to a persisted delivery.
+    pub fn apply_receipt(&self, receipt: DeliveryReceipt) -> Result<Delivery, RouteError> {
+        let mut delivery = self
+            .state
+            .load(&receipt.message_id)
+            .ok_or_else(|| RouteError::ReceiptNotFound(receipt.message_id.clone()))?;
+        if delivery.provider != receipt.provider {
+            return Err(RouteError::ReceiptProviderMismatch {
+                expected: delivery.provider,
+                actual: receipt.provider,
+            });
+        }
+        if delivery.provider_message_id.as_deref() != Some(receipt.provider_message_id.as_str()) {
+            return Err(RouteError::ReceiptCorrelationMismatch);
+        }
+        if delivery.status != DeliveryStatus::Accepted {
+            return Err(RouteError::ReceiptAlreadyFinal);
+        }
+        delivery.status = receipt.status.clone();
+        self.state.save(delivery.clone());
+        self.observer.observe(DeliveryEvent {
+            message_id: delivery.message_id.clone(),
+            recipient: delivery.recipient.clone(),
+            provider: delivery.provider.clone(),
+            kind: match receipt.status {
+                DeliveryStatus::Delivered => DeliveryEventKind::Delivered,
+                DeliveryStatus::Failed => DeliveryEventKind::Failed,
+                DeliveryStatus::Accepted => unreachable!("validated receipt cannot be accepted"),
+            },
+            provider_message_id: delivery.provider_message_id.clone(),
+        });
+        Ok(delivery)
     }
 
     fn elect(&self, request: &DeliveryRequest, now: u64) -> Result<Vec<String>, RouteError> {
@@ -948,6 +1042,19 @@ pub enum RouteError {
         /// Attempts made before exhaustion.
         attempts: Vec<Attempt>,
     },
+    /// No persisted delivery matched the receipt message id.
+    ReceiptNotFound(MessageId),
+    /// The receipt came from a different provider instance.
+    ReceiptProviderMismatch {
+        /// Provider recorded on the delivery.
+        expected: String,
+        /// Provider named by the receipt.
+        actual: String,
+    },
+    /// The receipt correlation id did not match the accepted delivery.
+    ReceiptCorrelationMismatch,
+    /// A terminal delivery cannot transition again.
+    ReceiptAlreadyFinal,
 }
 
 impl fmt::Display for RouteError {
@@ -980,6 +1087,24 @@ mod tests {
     impl Provider for FakeProvider {
         fn send(&self, _request: &DeliveryRequest) -> Result<ProviderResponse, ProviderError> {
             self.response.clone()
+        }
+    }
+
+    struct RetryProvider(AtomicU64);
+    impl Provider for RetryProvider {
+        fn send(&self, _request: &DeliveryRequest) -> Result<ProviderResponse, ProviderError> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(ProviderError::new(
+                    ErrorKind::Unavailable,
+                    "temporary",
+                    true,
+                    true,
+                ))
+            } else {
+                Ok(ProviderResponse {
+                    provider_message_id: "retried".into(),
+                })
+            }
         }
     }
 
@@ -1059,6 +1184,34 @@ mod tests {
         assert!(!invalid.is_retryable());
         assert!(!invalid.should_failover());
         assert!(invalid.is_terminal());
+    }
+
+    #[test]
+    fn retryable_error_retries_same_provider_before_failover() {
+        let registry = Arc::new(ProviderRegistry::new());
+        let config =
+            ProviderConfig::new("retry", 10, Capabilities::new(vec![Channel::Email])).unwrap();
+        registry
+            .register(
+                config,
+                Arc::new(RetryProvider(AtomicU64::new(0))),
+                CircuitBreaker::new(CircuitConfig::default()).unwrap(),
+                HealthTracker::new(1_000),
+            )
+            .unwrap();
+        let delivery = Router::new(
+            registry,
+            RouterPolicy::default(),
+            Arc::new(FakeClock::new(0)),
+            Arc::new(InMemoryStateStore::default()),
+            Arc::new(InMemoryObserver::default()),
+        )
+        .unwrap()
+        .deliver(request())
+        .unwrap();
+        assert_eq!(delivery.attempts.len(), 2);
+        assert!(delivery.attempts[0].error.is_some());
+        assert!(delivery.attempts[1].accepted);
     }
 
     #[test]
@@ -1181,6 +1334,86 @@ mod tests {
         .unwrap();
         assert_eq!(state.load(&delivery.message_id), Some(delivery));
         assert_eq!(observer.events()[0].recipient, "a***t");
+    }
+
+    #[test]
+    fn terminal_receipts_transition_state_and_emit_events() {
+        let registry = Arc::new(ProviderRegistry::new());
+        let (config, adapter) = provider(
+            "provider",
+            1,
+            Ok(ProviderResponse {
+                provider_message_id: "corr".into(),
+            }),
+        );
+        registry
+            .register(
+                config,
+                adapter,
+                CircuitBreaker::new(CircuitConfig::default()).unwrap(),
+                HealthTracker::new(1_000),
+            )
+            .unwrap();
+        let state = Arc::new(InMemoryStateStore::default());
+        let observer = Arc::new(InMemoryObserver::default());
+        let router = Router::new(
+            registry,
+            RouterPolicy::default(),
+            Arc::new(FakeClock::new(0)),
+            state,
+            observer.clone(),
+        )
+        .unwrap();
+        let delivery = router.deliver(request()).unwrap();
+        let receipt = DeliveryReceipt::new(
+            delivery.message_id.clone(),
+            "provider",
+            "corr",
+            DeliveryStatus::Delivered,
+        )
+        .unwrap();
+        let updated = router.apply_receipt(receipt).unwrap();
+        assert_eq!(updated.status, DeliveryStatus::Delivered);
+        assert_eq!(
+            observer.events().last().unwrap().kind,
+            DeliveryEventKind::Delivered
+        );
+    }
+
+    #[test]
+    fn receipt_provider_and_correlation_are_verified() {
+        let registry = Arc::new(ProviderRegistry::new());
+        let (config, adapter) = provider(
+            "provider",
+            1,
+            Ok(ProviderResponse {
+                provider_message_id: "corr".into(),
+            }),
+        );
+        registry
+            .register(
+                config,
+                adapter,
+                CircuitBreaker::new(CircuitConfig::default()).unwrap(),
+                HealthTracker::new(1_000),
+            )
+            .unwrap();
+        let router = Router::new(
+            registry,
+            RouterPolicy::default(),
+            Arc::new(FakeClock::new(0)),
+            Arc::new(InMemoryStateStore::default()),
+            Arc::new(InMemoryObserver::default()),
+        )
+        .unwrap();
+        let delivery = router.deliver(request()).unwrap();
+        let wrong =
+            DeliveryReceipt::new(delivery.message_id, "other", "corr", DeliveryStatus::Failed)
+                .unwrap();
+        assert!(matches!(
+            router.apply_receipt(wrong),
+            Err(RouteError::ReceiptProviderMismatch { .. })
+        ));
     }
 
     #[test]
@@ -1328,6 +1561,7 @@ mod tests {
                 let id = MessageId::new(format!("message-{index}")).unwrap();
                 let delivery = Delivery {
                     message_id: id.clone(),
+                    recipient: "a***t".into(),
                     provider: "provider".into(),
                     status: DeliveryStatus::Accepted,
                     provider_message_id: Some(format!("provider-{index}")),

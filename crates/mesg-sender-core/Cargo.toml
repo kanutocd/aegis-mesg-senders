@@ -16,8 +16,14 @@ path = "src/lib.rs"
 
 [features]
 default = []
-redis = []
-telemetry = []
+redis = ["dep:redis", "dep:serde", "dep:serde_json"]
+telemetry = ["dep:tracing"]
+
+[dependencies]
+redis = { version = "0.32", optional = true, default-features = false }
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_json = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"

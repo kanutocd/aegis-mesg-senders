@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added persisted terminal receipt transitions with provider/correlation validation and event emission.
+- Retried retryable provider errors once on the same provider within the existing bounded attempt budget.
+- Added an opt-in Redis client/JSON codec integration and a `tracing` observer.
+
 - Redacted raw message bodies and provider error details from debug output.
 - Added coverage tests for the feature-gated Redis and telemetry contracts.
 - Renamed the package and crate to `aegis-mesg-sender-core` / `aegis_mesg_sender_core`,
