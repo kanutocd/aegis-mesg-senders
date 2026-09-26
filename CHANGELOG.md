@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Made mutation analysis advisory for surviving mutants while retaining
+  blocking checks for tool, timeout, and baseline failures; added a mutation
+  report artifact and base64 regression vectors.
 - Removed unused `cargo-deny` license allowances for cleaner release output.
 - Made SMS live tests accept E.164 sender numbers and regional Infobip base URLs.
 - Added the JSON content type header required by TextBee live sends.

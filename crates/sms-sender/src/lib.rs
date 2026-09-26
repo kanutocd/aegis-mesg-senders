@@ -702,6 +702,15 @@ mod tests {
     }
 
     #[test]
+    fn base64_encodes_all_tail_lengths() {
+        assert_eq!(base64(""), "");
+        assert_eq!(base64("f"), "Zg==");
+        assert_eq!(base64("fo"), "Zm8=");
+        assert_eq!(base64("foo"), "Zm9v");
+        assert_eq!(base64("foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
     fn textbee_and_infobip_requests_match_provider_contracts() {
         let textbee_transport = Arc::new(FakeTransport::default());
         let textbee = TextBee {
