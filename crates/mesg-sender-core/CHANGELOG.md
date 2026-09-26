@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the approved Aegis GitHub avatar to the crate README.
+
 - Added persisted terminal receipt transitions with provider/correlation validation and event emission.
 - Retried retryable provider errors once on the same provider within the existing bounded attempt budget.
 - Added an opt-in Redis client/JSON codec integration and a `tracing` observer.

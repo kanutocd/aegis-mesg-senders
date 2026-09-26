@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the approved Aegis GitHub avatar to the crate README.
+
 - Added Mailgun multipart attachment requests and base64 Resend attachment payloads.
 - Added signed Mailgun webhook verification and provider-specific Resend/Mailgun status parsing.
 

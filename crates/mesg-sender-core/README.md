@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/branding/github/aegis-github-avatar.svg" alt="Aegis" width="128">
+</p>
+
 # aegis-mesg-sender-core
 
 `aegis-mesg-sender-core` is a channel-neutral delivery runtime for email, SMS, and other

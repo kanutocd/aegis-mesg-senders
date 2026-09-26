@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/branding/github/aegis-github-social-preview.png" alt="Aegis — trusted passage through infrastructure" width="100%">
+</p>
+
 # aegis-mesg-senders
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

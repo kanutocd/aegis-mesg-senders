@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/branding/github/aegis-github-avatar.svg" alt="Aegis" width="128">
+</p>
+
 # aegis-sms-sender
 
 Typed, provider-neutral SMS composition and provider adapters backed by

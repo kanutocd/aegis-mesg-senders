@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the approved Aegis GitHub branding assets to every workspace README.
+
 - Implemented SMS composition, E.164/GSM/Unicode validation, Twilio/TextBee/Semaphore/Infobip adapters, receipts, and test fixtures.
 - Added core receipt transitions, same-provider retry handling, concrete Redis/JSON and tracing integrations, Mailgun multipart attachments, and signed Mailgun/Resend webhook parsing.
 - Added release packaging order and dependency, license, audit, and mutation-testing automation.
