@@ -4,6 +4,8 @@
 
 - Removed the branch coverage threshold enforcement from CI because of a
   tooling reliability issue; function, line, and region gates remain active.
+- Removed branch instrumentation from the SMS coverage job because it changes
+  region totals and causes false region-gate failures.
 
 - Added `crates/README.md` as an index for the three publishable workspace crates.
 

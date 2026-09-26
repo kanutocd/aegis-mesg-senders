@@ -66,7 +66,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Enforce SMS coverage baseline
         run: >-
-          cargo +nightly llvm-cov --branch
+          cargo +nightly llvm-cov
           --package aegis-sms-sender --all-features
           --json --output-path sms-coverage.json
           --fail-under-functions 65
