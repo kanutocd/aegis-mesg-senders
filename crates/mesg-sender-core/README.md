@@ -10,7 +10,9 @@ selection, bounded failover, circuit state, normalized delivery state, and
 safe structured events.
 
 The default build has no channel SDK, network, runtime, database, or Redis
-dependency. Adapters implement the public traits at the application boundary.
+dependency. The opt-in `redis` feature provides a synchronous Redis client and
+JSON codec; the opt-in `telemetry` feature provides a safe `tracing` observer.
+Applications can also implement the public traits at their own boundary.
 
 ## Example
 
@@ -22,9 +24,9 @@ cargo run --example basic
 
 ## Optional integrations
 
-The `redis` and `telemetry` features expose small adapter contracts without
-adding a Redis client, serializer, or telemetry SDK. Consumer crates can wrap
-their existing dependencies with `RedisStateStore` and `TelemetryObserver`.
+The `redis` feature exposes `RedisClientBackend`, `JsonDeliveryCodec`, and
+`RedisStateStore`. The `telemetry` feature exposes `TracingObserver` and the
+generic `TelemetryObserver` for application-owned sinks.
 
 ## Status
 

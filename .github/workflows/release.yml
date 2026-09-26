@@ -21,7 +21,8 @@ jobs:
       - run: cargo package -p aegis-sms-sender --allow-dirty
       - name: Explain publish order
         run: |
-          echo 'Publish aegis-mesg-sender-core first, then email, then SMS.'
+          echo 'Initial release: publish aegis-mesg-sender-core first, then email.'
+          echo 'SMS is packaged and verified, but publishing it requires --publish-sms.'
           echo 'This workflow packages and verifies; publishing requires an explicit release operator action.'
 
   dependency-and-policy-gates:

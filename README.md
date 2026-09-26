@@ -45,15 +45,18 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo doc --workspace --all-features --no-deps
 
-# Generate coverage and enforce the CI thresholds for implemented crates
+# Generate coverage and enforce the core/email thresholds
 cargo +nightly llvm-cov --branch \
   --package aegis-mesg-sender-core --package aegis-email-sender \
   --all-features --json --output-path coverage.json \
   --fail-under-functions 80 --fail-under-lines 85 --fail-under-regions 85
+
+# SMS has a separate baseline gate in CI while adapter-path coverage expands
+cargo +nightly llvm-cov --branch --package aegis-sms-sender --all-features
 ```
 
 Each crate remains independently publishable to crates.io.
 
-The initial release scope is still the core runtime and email sender. SMS now
+The initial release scope is the core runtime and email sender. SMS now
 has validation, provider adapters, receipts, and fixture-style transport tests;
-live provider sandbox fixtures and operational sign-off remain prerequisites.
+live provider sandbox execution and operational sign-off remain prerequisites.

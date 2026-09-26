@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${1:-}" != "--publish" ]]; then
+if [[ "${1:-}" != "--publish" && "${1:-}" != "--publish-sms" ]]; then
   echo "dry run: core -> email -> sms"
   cargo publish -p aegis-mesg-sender-core --dry-run
   cargo publish -p aegis-email-sender --dry-run
@@ -14,4 +14,8 @@ echo "Core published. Wait for crates.io indexing before publishing dependents."
 read -r -p "Publish email and SMS now? [y/N] " confirmation
 [[ "$confirmation" == "y" || "$confirmation" == "Y" ]]
 cargo publish -p aegis-email-sender
-cargo publish -p aegis-sms-sender
+if [[ "${1:-}" == "--publish-sms" ]]; then
+  cargo publish -p aegis-sms-sender
+else
+  echo "SMS remains excluded from the initial production release. Use --publish-sms explicitly."
+fi

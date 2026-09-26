@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Added the approved Aegis GitHub branding assets to every workspace README.
+- Added provider fixtures, webhook replay/signature hardening, SMS coverage
+  validation, and explicit core-plus-email initial release selection.
+- Documented deterministic fixture boundaries and credential-gated live sandbox
+  validation.
 
 - Implemented SMS composition, E.164/GSM/Unicode validation, Twilio/TextBee/Semaphore/Infobip adapters, receipts, and test fixtures.
 - Added core receipt transitions, same-provider retry handling, concrete Redis/JSON and tracing integrations, Mailgun multipart attachments, and signed Mailgun/Resend webhook parsing.
