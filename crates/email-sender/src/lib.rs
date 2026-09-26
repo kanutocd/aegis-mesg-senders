@@ -11,7 +11,9 @@ use aegis_mesg_sender_core::{
     Channel, DeliveryRequest, ErrorKind, Message, MessageId, Provider, ProviderError,
     ProviderResponse, Recipient, ValidationError,
 };
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
@@ -453,6 +455,49 @@ fn base64_encode(value: &[u8]) -> String {
     output
 }
 
+fn multipart_escape(value: &str) -> Result<String, ProviderError> {
+    if value.contains(['\r', '\n', '"']) {
+        return Err(ProviderError::invalid_request(
+            "multipart metadata contains an invalid header character",
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn multipart_body(
+    fields: &BTreeMap<String, String>,
+    attachments: &[Attachment],
+    boundary: &str,
+) -> Result<Vec<u8>, ProviderError> {
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+                multipart_escape(name)?,
+                value
+            )
+            .as_bytes(),
+        );
+    }
+    for attachment in attachments {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Disposition: form-data; name=\"attachment\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+                multipart_escape(&attachment.filename)?,
+                multipart_escape(&attachment.content_type)?
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(&attachment.data);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Ok(body)
+}
+
 fn submit(
     transport: &dyn HttpTransport,
     request: HttpRequest,
@@ -525,7 +570,18 @@ impl Resend {
 impl Provider for Resend {
     fn send(&self, request: &DeliveryRequest) -> Result<ProviderResponse, ProviderError> {
         let email = message(request)?;
-        let body = serde_json::json!({ "from": email.from, "to": email.to, "cc": email.cc, "bcc": email.bcc, "reply_to": email.reply_to, "subject": email.subject, "text": email.text, "html": email.html, "headers": email.headers, "attachments": email.attachments });
+        let attachments = email
+            .attachments
+            .iter()
+            .map(|attachment| {
+                serde_json::json!({
+                    "filename": attachment.filename,
+                    "content": base64_encode(&attachment.data),
+                    "content_type": attachment.content_type
+                })
+            })
+            .collect::<Vec<_>>();
+        let body = serde_json::json!({ "from": email.from, "to": email.to, "cc": email.cc, "bcc": email.bcc, "reply_to": email.reply_to, "subject": email.subject, "text": email.text, "html": email.html, "headers": email.headers, "attachments": attachments });
         let mut headers = BTreeMap::from([
             (
                 String::from("authorization"),
@@ -602,11 +658,6 @@ impl Mailgun {
 impl Provider for Mailgun {
     fn send(&self, request: &DeliveryRequest) -> Result<ProviderResponse, ProviderError> {
         let email = message(request)?;
-        if !email.attachments.is_empty() {
-            return Err(ProviderError::invalid_request(
-                "Mailgun attachments require multipart transport",
-            ));
-        }
         let mut form = BTreeMap::new();
         form.insert(String::from("from"), email.from);
         form.insert(String::from("to"), email.to.join(","));
@@ -632,11 +683,22 @@ impl Provider for Mailgun {
         if self.sandbox {
             form.insert(String::from("o:testmode"), String::from("yes"));
         }
-        let body = form
-            .into_iter()
-            .map(|(key, value)| format!("{}={}", form_encode(&key), form_encode(&value)))
-            .collect::<Vec<_>>()
-            .join("&");
+        let (body, content_type) = if email.attachments.is_empty() {
+            (
+                form.into_iter()
+                    .map(|(key, value)| format!("{}={}", form_encode(&key), form_encode(&value)))
+                    .collect::<Vec<_>>()
+                    .join("&")
+                    .into_bytes(),
+                String::from("application/x-www-form-urlencoded"),
+            )
+        } else {
+            let boundary = format!("aegis-{}", request.message.id.as_str());
+            (
+                multipart_body(&form, &email.attachments, &boundary)?,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+        };
         submit(
             self.transport.as_ref(),
             HttpRequest {
@@ -654,12 +716,9 @@ impl Provider for Mailgun {
                             base64_encode(format!("api:{}", self.config.api_key).as_bytes())
                         ),
                     ),
-                    (
-                        String::from("content-type"),
-                        String::from("application/x-www-form-urlencoded"),
-                    ),
+                    (String::from("content-type"), content_type),
                 ]),
-                body: body.into_bytes(),
+                body,
             },
         )
     }
@@ -764,6 +823,125 @@ pub fn normalize_receipt(
         provider_message_id,
         status,
     })
+}
+
+/// Webhook parsing and signature failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WebhookError {
+    /// The payload could not be decoded.
+    InvalidPayload,
+    /// A required webhook field was absent.
+    MissingField(&'static str),
+    /// The signature did not verify.
+    InvalidSignature,
+    /// The provider status is not terminal or recognized.
+    UnknownStatus,
+}
+
+impl fmt::Display for WebhookError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+impl std::error::Error for WebhookError {}
+
+/// Mailgun event webhook envelope fields used for delivery normalization.
+#[derive(Clone, Debug, Deserialize)]
+pub struct MailgunWebhook {
+    /// Mailgun signature envelope.
+    pub signature: MailgunSignature,
+    /// Event data.
+    pub event_data: MailgunEventData,
+}
+
+/// Mailgun signature fields.
+#[derive(Clone, Debug, Deserialize)]
+pub struct MailgunSignature {
+    /// Unix timestamp represented as a string.
+    pub timestamp: String,
+    /// Webhook token.
+    pub token: String,
+    /// Hex HMAC-SHA256 signature.
+    pub signature: String,
+}
+
+/// Mailgun event data fields.
+#[derive(Clone, Debug, Deserialize)]
+pub struct MailgunEventData {
+    /// Provider message id.
+    pub id: String,
+    /// Mailgun event name.
+    pub event: String,
+}
+
+/// Parses and verifies a Mailgun webhook using the signing key.
+pub fn parse_mailgun_webhook(
+    payload: &[u8],
+    signing_key: &str,
+    message_id: MessageId,
+) -> Result<DeliveryReceipt, WebhookError> {
+    let webhook: MailgunWebhook =
+        serde_json::from_slice(payload).map_err(|_| WebhookError::InvalidPayload)?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(signing_key.as_bytes())
+        .map_err(|_| WebhookError::InvalidSignature)?;
+    mac.update(format!("{}{}", webhook.signature.timestamp, webhook.signature.token).as_bytes());
+    let expected = mac.finalize().into_bytes();
+    let supplied =
+        decode_hex(&webhook.signature.signature).ok_or(WebhookError::InvalidSignature)?;
+    if expected.as_slice() != supplied.as_slice() {
+        return Err(WebhookError::InvalidSignature);
+    }
+    let status = match webhook.event_data.event.as_str() {
+        "delivered" => ReceiptStatus::Delivered,
+        "failed" | "rejected" | "undelivered" => ReceiptStatus::Failed,
+        _ => return Err(WebhookError::UnknownStatus),
+    };
+    normalize_receipt(message_id, webhook.event_data.id, status)
+        .map_err(|_| WebhookError::InvalidPayload)
+}
+
+/// Resend event fields used for delivery normalization.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ResendWebhook {
+    /// Event type, such as `email.delivered`.
+    pub r#type: String,
+    /// Event payload.
+    pub data: ResendWebhookData,
+}
+
+/// Resend event data.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ResendWebhookData {
+    /// Provider email id.
+    pub email_id: String,
+}
+
+/// Parses a Resend event payload. Signature verification is performed by the
+/// caller's Svix-compatible ingress because Resend signs the complete HTTP
+/// envelope, including timestamp and message id.
+pub fn parse_resend_webhook(
+    payload: &[u8],
+    message_id: MessageId,
+) -> Result<DeliveryReceipt, WebhookError> {
+    let webhook: ResendWebhook =
+        serde_json::from_slice(payload).map_err(|_| WebhookError::InvalidPayload)?;
+    let status = match webhook.r#type.as_str() {
+        "email.delivered" => ReceiptStatus::Delivered,
+        "email.bounced" | "email.failed" => ReceiptStatus::Failed,
+        _ => return Err(WebhookError::UnknownStatus),
+    };
+    normalize_receipt(message_id, webhook.data.email_id, status)
+        .map_err(|_| WebhookError::InvalidPayload)
+}
+
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
+        .collect()
 }
 
 /// Converts an email into a aegis-mesg-sender-core request after validation.
@@ -983,7 +1161,7 @@ mod tests {
 
     #[cfg(feature = "mailgun")]
     #[test]
-    fn mailgun_does_not_silently_drop_attachments() {
+    fn mailgun_encodes_attachments_as_multipart() {
         let transport = Arc::new(Transport {
             requests: Mutex::new(Vec::new()),
             response: HttpResponse {
@@ -1009,10 +1187,47 @@ mod tests {
             transport.clone(),
         )
         .unwrap();
-        let error = adapter
+        adapter
             .send(&to_delivery_request(&email, &MessageId::new("m-3").unwrap()).unwrap())
-            .unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidRequest);
-        assert!(transport.requests.lock().unwrap().is_empty());
+            .unwrap();
+        let request = &transport.requests.lock().unwrap()[0];
+        assert!(request.headers["content-type"].starts_with("multipart/form-data; boundary="));
+        let body = String::from_utf8_lossy(&request.body);
+        assert!(body.contains("filename=\"a.txt\""));
+        assert!(body.contains("content"));
+    }
+
+    #[test]
+    fn provider_webhooks_verify_and_map_terminal_statuses() {
+        let mut mac = Hmac::<Sha256>::new_from_slice(b"signing-key").unwrap();
+        mac.update(b"1700000000token");
+        let signature = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let payload = serde_json::json!({
+            "signature": {"timestamp": "1700000000", "token": "token", "signature": signature},
+            "event_data": {"id": "mailgun-id", "event": "delivered"}
+        });
+        let receipt = parse_mailgun_webhook(
+            &serde_json::to_vec(&payload).unwrap(),
+            "signing-key",
+            MessageId::new("m-mailgun").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipt.status, ReceiptStatus::Delivered);
+
+        let resend = serde_json::json!({
+            "type": "email.bounced",
+            "data": {"email_id": "resend-id"}
+        });
+        let receipt = parse_resend_webhook(
+            &serde_json::to_vec(&resend).unwrap(),
+            MessageId::new("m-resend").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipt.status, ReceiptStatus::Failed);
     }
 }

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added Mailgun multipart attachment requests and base64 Resend attachment payloads.
+- Added signed Mailgun webhook verification and provider-specific Resend/Mailgun status parsing.
+
 - Corrected Mailgun authentication and form encoding, mapped recipient/header
   fields, and rejected attachments until multipart transport is supported.
 - Add provider usage documentation, a composition example, and tag-triggered
