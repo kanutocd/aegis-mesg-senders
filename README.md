@@ -57,6 +57,29 @@ cargo +nightly llvm-cov --branch --package aegis-sms-sender --all-features
 
 Each crate remains independently publishable to crates.io.
 
+## Opt-in live provider tests
+
+Normal tests never use credentials or the network. Compile the ignored live
+harnesses with `live-tests` and run only the providers you have configured:
+
+```bash
+docker compose -f docker-compose.mailpit.yml up -d
+export AEGIS_LIVE_EMAIL_TO=you@example.test
+cargo test -p aegis-email-sender --features live-tests --test live -- --ignored
+
+export AEGIS_SMS_TO=+15551234567
+export AEGIS_TEXTBEE_ENDPOINT=https://your-textbee-endpoint.example
+export AEGIS_TEXTBEE_API_KEY=...
+export AEGIS_TEXTBEE_DEVICE_ID=...
+export AEGIS_INFOBIP_API_KEY=...
+cargo test -p aegis-sms-sender --features live-tests --test live -- --ignored
+```
+
+Email variables are `AEGIS_RESEND_API_KEY`/`AEGIS_RESEND_FROM`,
+`AEGIS_MAILGUN_API_KEY`/`AEGIS_MAILGUN_DOMAIN`/`AEGIS_MAILGUN_FROM`, and
+optional `AEGIS_MAILPIT_ENDPOINT`/`AEGIS_MAILPIT_FROM`. These tests send real
+messages and are intentionally excluded from CI.
+
 The initial release scope is the core runtime and email sender. SMS now
 has validation, provider adapters, receipts, and fixture-style transport tests;
 live provider sandbox execution and operational sign-off remain prerequisites.
