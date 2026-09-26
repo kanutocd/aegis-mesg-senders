@@ -62,12 +62,13 @@ fn sms() -> SmsMessage {
 #[test]
 #[ignore = "sends a real SMS; run explicitly with --features live-tests -- --ignored"]
 fn textbee_live() {
-    let endpoint = required("AEGIS_TEXTBEE_ENDPOINT");
+    let endpoint = std::env::var("AEGIS_TEXTBEE_ENDPOINT")
+        .unwrap_or_else(|_| "https://api.textbee.dev/api/v1/gateway/send-sms".into());
     let provider = TextBee {
         transport: Arc::new(UreqTransport::new()),
         endpoint,
         api_key: required("AEGIS_TEXTBEE_API_KEY"),
-        device_id: required("AEGIS_TEXTBEE_DEVICE_ID"),
+        device_id: std::env::var("AEGIS_TEXTBEE_DEVICE_ID").unwrap_or_default(),
     };
     let request = to_delivery_request(&sms(), &MessageId::new("live-textbee").unwrap()).unwrap();
     provider.send(&request).expect("TextBee accepted live SMS");

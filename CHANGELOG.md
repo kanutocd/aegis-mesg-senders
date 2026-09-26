@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Corrected TextBee live integration payload and response handling to match its
+  current API contract.
 - Fixed Mailpit live delivery handling when its successful response has no
   provider message ID.
 - Added an opt-in live provider test harness for Resend, Mailgun, Mailpit,

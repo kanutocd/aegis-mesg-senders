@@ -277,6 +277,7 @@ fn provider_response(
         .or_else(|| value.get("id"))
         .or_else(|| value.get("sid"))
         .or_else(|| value.pointer("/data/id"))
+        .or_else(|| value.pointer("/data/smsBatchId"))
         .or_else(|| value.pointer("/messages/0/messageId"))
         .or_else(|| value.pointer("/messages/0/message_id"))
         .or_else(|| value.pointer("/0/message_id"))
@@ -402,16 +403,16 @@ impl<T: HttpTransport> Provider for TextBee<T> {
             .map_err(|_| ProviderError::invalid_request("invalid SMS payload"))?;
         let mut headers = BTreeMap::new();
         headers.insert("x-api-key".into(), self.api_key.clone());
+        let mut body = serde_json::json!({
+            "recipients": [sms.to.as_str()],
+            "message": sms.body
+        });
+        if !self.device_id.trim().is_empty() {
+            body["deviceId"] = serde_json::Value::String(self.device_id.clone());
+        }
         provider_response(
-            self.transport.send(json_request(
-                &self.endpoint,
-                serde_json::json!({
-                    "phone_number": sms.to.as_str(),
-                    "message": sms.body,
-                    "device_id": self.device_id
-                }),
-                headers,
-            )),
+            self.transport
+                .send(json_request(&self.endpoint, body, headers)),
             "TextBee",
         )
     }

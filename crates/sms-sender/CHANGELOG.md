@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Corrected TextBee live requests and response correlation to match its
+  `recipients`, optional `deviceId`, and `data.smsBatchId` API contract.
 - Added ignored, credential-gated live tests for TextBee and Infobip.
 - Added the approved Aegis GitHub avatar to the crate README.
 
