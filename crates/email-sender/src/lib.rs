@@ -1005,16 +1005,19 @@ pub fn verify_resend_webhook_signature(
         .strip_prefix("whsec_")
         .unwrap_or(signing_secret);
     let secret = base64_decode(secret).ok_or(WebhookError::InvalidSignature)?;
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(&secret).map_err(|_| WebhookError::InvalidSignature)?;
-    mac.update(format!("{svix_id}.{svix_timestamp}.").as_bytes());
-    mac.update(payload);
-    let expected = mac.finalize().into_bytes();
     let valid = svix_signature.split_whitespace().any(|signature| {
         let Some(value) = signature.strip_prefix("v1,") else {
             return false;
         };
-        base64_decode(value).is_some_and(|candidate| candidate.as_slice() == expected.as_slice())
+        let Some(candidate) = base64_decode(value) else {
+            return false;
+        };
+        let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(&secret) else {
+            return false;
+        };
+        mac.update(format!("{svix_id}.{svix_timestamp}.").as_bytes());
+        mac.update(payload);
+        mac.verify_slice(&candidate).is_ok()
     });
     if valid {
         Ok(())
