@@ -41,6 +41,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo doc --workspace --all-features --no-deps
+
+# Generate LCOV coverage for implemented crates
+cargo llvm-cov --package aegis-mesg-sender-core --package aegis-email-sender \
+  --all-features --lcov --output-path lcov.info
 ```
 
 Each crate remains independently publishable to crates.io.

@@ -24,3 +24,15 @@ jobs:
       # exist in crates.io; those run in the release sequence after core is
       # published.
       - run: cargo package -p aegis-mesg-sender-core --allow-dirty
+
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --package aegis-mesg-sender-core --package aegis-email-sender --all-features --lcov --output-path lcov.info
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rust-coverage
+          path: lcov.info
