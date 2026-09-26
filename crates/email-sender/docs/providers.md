@@ -12,3 +12,7 @@ provide a fixture transport without credentials or network access.
 
 Provider responses are only submission acceptance. Delivery confirmation is
 represented separately by `DeliveryReceipt` and `normalize_receipt`.
+
+Deterministic response fixtures are stored under `fixtures/` and exercised by
+unit tests. Live provider checks require application-owned HTTP transports and
+credentials, so they are intentionally kept out of normal CI.

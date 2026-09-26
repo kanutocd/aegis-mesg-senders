@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Added the approved Aegis GitHub avatar to the crate README.
+- Added provider response fixtures, Mailgun replay protection, application
+  message-ID extraction, and Resend/Svix signature verification.
 
 - Added Mailgun multipart attachment requests and base64 Resend attachment payloads.
 - Added signed Mailgun webhook verification and provider-specific Resend/Mailgun status parsing.

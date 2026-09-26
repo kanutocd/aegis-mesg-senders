@@ -12,3 +12,7 @@ normalized receipts, and injected-transport adapters for Twilio, TextBee,
 Semaphore, and Infobip. Provider credentials and HTTP clients remain owned by
 the consuming application. Live provider sandbox fixtures and operational
 sign-off remain release prerequisites.
+
+Provider-shaped response fixtures live under `fixtures/` and are used by the
+protocol tests. Live sandbox checks must be run by the consuming application
+with its own credentials and HTTP transport.

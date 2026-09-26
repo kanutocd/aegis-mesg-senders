@@ -275,7 +275,11 @@ fn provider_response(
         .get("message_id")
         .or_else(|| value.get("messageId"))
         .or_else(|| value.get("id"))
+        .or_else(|| value.get("sid"))
+        .or_else(|| value.pointer("/data/id"))
         .or_else(|| value.pointer("/messages/0/messageId"))
+        .or_else(|| value.pointer("/messages/0/message_id"))
+        .or_else(|| value.pointer("/0/message_id"))
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
             ProviderError::from_kind(
@@ -316,11 +320,24 @@ fn form_request(
         headers,
         body: fields
             .iter()
-            .map(|(key, value)| format!("{key}={value}"))
+            .map(|(key, value)| format!("{}={}", form_encode(key), form_encode(value)))
             .collect::<Vec<_>>()
             .join("&")
             .into_bytes(),
     }
+}
+
+fn form_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(*byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 /// Twilio configuration and adapter.
@@ -600,5 +617,50 @@ mod tests {
             SmsReceiptStatus::Failed
         );
         assert!(normalize_receipt("id", "queued").is_err());
+    }
+
+    #[test]
+    fn provider_response_fixtures_cover_provider_id_shapes() {
+        for (fixture, expected) in [
+            (
+                include_str!("../fixtures/twilio/success.json"),
+                "SMfixture0001",
+            ),
+            (
+                include_str!("../fixtures/textbee/success.json"),
+                "textbee-fixture-0001",
+            ),
+            (
+                include_str!("../fixtures/semaphore/success.json"),
+                "semaphore-fixture-0001",
+            ),
+            (
+                include_str!("../fixtures/infobip/success.json"),
+                "infobip-fixture-0001",
+            ),
+        ] {
+            let result = provider_response(
+                Ok(HttpResponse {
+                    status: 200,
+                    body: fixture.as_bytes().to_vec(),
+                }),
+                "fixture",
+            )
+            .unwrap();
+            assert_eq!(result.provider_message_id, expected);
+        }
+    }
+
+    #[test]
+    fn form_values_are_percent_encoded() {
+        let request = form_request(
+            "https://provider.test",
+            &[("message", "hello world&yes")],
+            BTreeMap::new(),
+        );
+        assert_eq!(
+            String::from_utf8(request.body).unwrap(),
+            "message=hello%20world%26yes"
+        );
     }
 }

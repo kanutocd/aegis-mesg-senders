@@ -834,6 +834,8 @@ pub enum WebhookError {
     MissingField(&'static str),
     /// The signature did not verify.
     InvalidSignature,
+    /// The signature timestamp is outside the replay-protection window.
+    StaleSignature,
     /// The provider status is not terminal or recognized.
     UnknownStatus,
 }
@@ -872,6 +874,9 @@ pub struct MailgunEventData {
     pub id: String,
     /// Mailgun event name.
     pub event: String,
+    /// Application metadata attached to the provider event.
+    #[serde(rename = "user-variables", default)]
+    pub user_variables: BTreeMap<String, String>,
 }
 
 /// Parses and verifies a Mailgun webhook using the signing key.
@@ -880,17 +885,36 @@ pub fn parse_mailgun_webhook(
     signing_key: &str,
     message_id: MessageId,
 ) -> Result<DeliveryReceipt, WebhookError> {
+    parse_mailgun_webhook_at(payload, signing_key, message_id, None, 0)
+}
+
+/// Parses a Mailgun webhook with timestamp freshness validation.
+pub fn parse_mailgun_webhook_at(
+    payload: &[u8],
+    signing_key: &str,
+    message_id: MessageId,
+    now_unix_seconds: Option<i64>,
+    max_age_seconds: i64,
+) -> Result<DeliveryReceipt, WebhookError> {
     let webhook: MailgunWebhook =
         serde_json::from_slice(payload).map_err(|_| WebhookError::InvalidPayload)?;
+    if let Some(now) = now_unix_seconds {
+        let timestamp = webhook
+            .signature
+            .timestamp
+            .parse::<i64>()
+            .map_err(|_| WebhookError::InvalidPayload)?;
+        if timestamp > now || now.saturating_sub(timestamp) > max_age_seconds {
+            return Err(WebhookError::StaleSignature);
+        }
+    }
     let mut mac = Hmac::<Sha256>::new_from_slice(signing_key.as_bytes())
         .map_err(|_| WebhookError::InvalidSignature)?;
     mac.update(format!("{}{}", webhook.signature.timestamp, webhook.signature.token).as_bytes());
-    let expected = mac.finalize().into_bytes();
     let supplied =
         decode_hex(&webhook.signature.signature).ok_or(WebhookError::InvalidSignature)?;
-    if expected.as_slice() != supplied.as_slice() {
-        return Err(WebhookError::InvalidSignature);
-    }
+    mac.verify_slice(&supplied)
+        .map_err(|_| WebhookError::InvalidSignature)?;
     let status = match webhook.event_data.event.as_str() {
         "delivered" => ReceiptStatus::Delivered,
         "failed" | "rejected" | "undelivered" => ReceiptStatus::Failed,
@@ -898,6 +922,31 @@ pub fn parse_mailgun_webhook(
     };
     normalize_receipt(message_id, webhook.event_data.id, status)
         .map_err(|_| WebhookError::InvalidPayload)
+}
+
+/// Parses a Mailgun event and extracts `user-variables.aegis_message_id`.
+pub fn parse_mailgun_webhook_from_event(
+    payload: &[u8],
+    signing_key: &str,
+    now_unix_seconds: i64,
+    max_age_seconds: i64,
+) -> Result<DeliveryReceipt, WebhookError> {
+    let webhook: MailgunWebhook =
+        serde_json::from_slice(payload).map_err(|_| WebhookError::InvalidPayload)?;
+    let message_id = webhook
+        .event_data
+        .user_variables
+        .get("aegis_message_id")
+        .ok_or(WebhookError::MissingField(
+            "user-variables.aegis_message_id",
+        ))?;
+    parse_mailgun_webhook_at(
+        payload,
+        signing_key,
+        MessageId::new(message_id).map_err(|_| WebhookError::InvalidPayload)?,
+        Some(now_unix_seconds),
+        max_age_seconds,
+    )
 }
 
 /// Resend event fields used for delivery normalization.
@@ -934,6 +983,46 @@ pub fn parse_resend_webhook(
         .map_err(|_| WebhookError::InvalidPayload)
 }
 
+/// Verifies a Resend webhook's Svix signature before parsing its event.
+pub fn verify_resend_webhook_signature(
+    payload: &[u8],
+    svix_id: &str,
+    svix_timestamp: &str,
+    svix_signature: &str,
+    signing_secret: &str,
+    now_unix_seconds: i64,
+    tolerance_seconds: i64,
+) -> Result<(), WebhookError> {
+    let timestamp = svix_timestamp
+        .parse::<i64>()
+        .map_err(|_| WebhookError::InvalidSignature)?;
+    if timestamp > now_unix_seconds
+        || now_unix_seconds.saturating_sub(timestamp) > tolerance_seconds
+    {
+        return Err(WebhookError::StaleSignature);
+    }
+    let secret = signing_secret
+        .strip_prefix("whsec_")
+        .unwrap_or(signing_secret);
+    let secret = base64_decode(secret).ok_or(WebhookError::InvalidSignature)?;
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(&secret).map_err(|_| WebhookError::InvalidSignature)?;
+    mac.update(format!("{svix_id}.{svix_timestamp}.").as_bytes());
+    mac.update(payload);
+    let expected = mac.finalize().into_bytes();
+    let valid = svix_signature.split_whitespace().any(|signature| {
+        let Some(value) = signature.strip_prefix("v1,") else {
+            return false;
+        };
+        base64_decode(value).is_some_and(|candidate| candidate.as_slice() == expected.as_slice())
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(WebhookError::InvalidSignature)
+    }
+}
+
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
     if value.len() % 2 != 0 {
         return None;
@@ -942,6 +1031,32 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
         .collect()
+}
+
+fn base64_decode(value: &str) -> Option<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0u8;
+    for byte in value.bytes() {
+        if byte == b'=' {
+            break;
+        }
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32;
+        buffer = (buffer << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            output.push((buffer >> bits) as u8);
+        }
+    }
+    Some(output)
 }
 
 /// Converts an email into a aegis-mesg-sender-core request after validation.
@@ -1033,6 +1148,76 @@ mod tests {
         assert_eq!(request.url, "https://api.resend.test/emails");
         assert_eq!(request.headers["idempotency-key"], "idem-1");
         assert!(String::from_utf8_lossy(&request.body).contains("alice@example.test"));
+    }
+
+    #[test]
+    fn provider_success_fixtures_have_stable_ids() {
+        for (fixture, expected) in [
+            (
+                include_str!("../fixtures/resend/success.json"),
+                "resend-fixture-0001",
+            ),
+            (
+                include_str!("../fixtures/mailgun/success.json"),
+                "<mailgun-fixture-0001@example.test>",
+            ),
+            (
+                include_str!("../fixtures/mailpit/success.json"),
+                "mailpit-fixture-0001",
+            ),
+        ] {
+            let value: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert_eq!(
+                value.get("id").and_then(serde_json::Value::as_str),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn resend_payload_contains_supported_fields_and_encoded_attachment() {
+        let transport = Arc::new(Transport {
+            requests: Mutex::new(Vec::new()),
+            response: HttpResponse {
+                status: 200,
+                headers: BTreeMap::new(),
+                body: br#"{"id":"re_full"}"#.to_vec(),
+            },
+        });
+        let email = EmailMessage::builder("sender@example.test")
+            .to("alice@example.test")
+            .cc("copy@example.test")
+            .bcc("blind@example.test")
+            .reply_to("reply@example.test")
+            .subject("Subject")
+            .text("Plain")
+            .html("<p>HTML</p>")
+            .header("X-Trace", "trace-1")
+            .attachment(Attachment {
+                filename: "hello.txt".into(),
+                content_type: "text/plain".into(),
+                data: b"hello".to_vec(),
+            })
+            .build()
+            .unwrap();
+        Resend::new(
+            HttpProviderConfig::new("https://api.resend.test", "secret").unwrap(),
+            transport.clone(),
+        )
+        .send(&to_delivery_request(&email, &MessageId::new("m-full").unwrap()).unwrap())
+        .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        let body = String::from_utf8_lossy(&requests[0].body);
+        for expected in [
+            "copy@example.test",
+            "blind@example.test",
+            "reply@example.test",
+            "X-Trace",
+            "hello.txt",
+            "aGVsbG8=",
+        ] {
+            assert!(body.contains(expected), "missing {expected}");
+        }
     }
 
     #[test]
@@ -1229,5 +1414,61 @@ mod tests {
         )
         .unwrap();
         assert_eq!(receipt.status, ReceiptStatus::Failed);
+    }
+
+    #[test]
+    fn webhook_replay_protection_and_resend_svix_verification_work() {
+        let mut mailgun_mac = Hmac::<Sha256>::new_from_slice(b"signing-key").unwrap();
+        mailgun_mac.update(b"1700000000token");
+        let signature = mailgun_mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let mailgun = serde_json::json!({
+            "signature": {"timestamp": "1700000000", "token": "token", "signature": signature},
+            "event_data": {"id": "mailgun-id", "event": "delivered", "user-variables": {"aegis_message_id": "m-mailgun"}}
+        });
+        assert_eq!(
+            parse_mailgun_webhook_from_event(
+                &serde_json::to_vec(&mailgun).unwrap(),
+                "signing-key",
+                1_700_000_060,
+                300,
+            )
+            .unwrap()
+            .message_id
+            .as_str(),
+            "m-mailgun"
+        );
+        assert_eq!(
+            parse_mailgun_webhook_from_event(
+                &serde_json::to_vec(&mailgun).unwrap(),
+                "signing-key",
+                1_700_001_000,
+                300,
+            )
+            .unwrap_err(),
+            WebhookError::StaleSignature
+        );
+
+        let payload = br#"{"type":"email.delivered","data":{"email_id":"re-1"}}"#;
+        let secret = b"webhook-secret";
+        let secret_encoded = base64_encode(secret);
+        let mut resend_mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
+        resend_mac.update(b"msg-1.1700000000.");
+        resend_mac.update(payload);
+        let signature = format!("v1,{}", base64_encode(&resend_mac.finalize().into_bytes()));
+        verify_resend_webhook_signature(
+            payload,
+            "msg-1",
+            "1700000000",
+            &signature,
+            &format!("whsec_{secret_encoded}"),
+            1_700_000_060,
+            300,
+        )
+        .unwrap();
     }
 }

@@ -5,3 +5,6 @@
 - Added the approved Aegis GitHub avatar to the crate README.
 
 - Implemented the SMS domain model, E.164/GSM/Unicode/segment validation, metadata, receipts, and injected HTTP adapters for Twilio, TextBee, Semaphore, and Infobip.
+- Added response fixtures for all SMS providers, provider-shaped ID parsing,
+  and percent-encoded form requests.
+- Documented credential-gated live sandbox validation and fixture ownership.
