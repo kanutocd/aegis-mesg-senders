@@ -1,0 +1,28 @@
+[package]
+name = "aegis-mesg-sender-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ken C. Demanawa <kenneth.c.demanawa@gmail.com>"]
+rust-version = "1.75"
+description = "Channel-neutral delivery runtime for outbound sender crates"
+license = "MIT"
+repository = "https://github.com/kanutocd/aegis-mesg-senders"
+readme = "README.md"
+keywords = ["delivery", "email", "sms", "routing"]
+
+[lib]
+name = "aegis_mesg_sender_core"
+path = "src/lib.rs"
+
+[features]
+default = []
+redis = []
+telemetry = []
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = "warn"
