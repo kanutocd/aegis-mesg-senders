@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/branding/github/aegis-github-social-preview.png" alt="Aegis — trusted passage through infrastructure" width="100%">
+  <img src="docs/branding/github/aegis-github-social-preview.png" alt="Aegis — The boringly reliable API gateway for every tenant." width="100%">
 </p>
 
 # aegis-mesg-senders
