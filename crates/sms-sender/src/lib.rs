@@ -489,7 +489,7 @@ impl<T: HttpTransport> Provider for Infobip<T> {
         provider_response(
             self.transport.send(json_request(
                 &self.endpoint,
-                serde_json::json!({"messages":[{"destinations":[{"to": sms.to.as_str()}], "from": sms.from.value(), "text": sms.body}]}),
+                serde_json::json!({"messages":[{"sender": sms.from.value(), "destinations":[{"to": sms.to.as_str()}], "content": {"text": sms.body}}]}),
                 headers,
             )),
             "Infobip",
@@ -674,5 +674,37 @@ mod tests {
             String::from_utf8(request.body).unwrap(),
             "message=hello%20world%26yes"
         );
+    }
+
+    #[test]
+    fn textbee_and_infobip_requests_match_provider_contracts() {
+        let textbee_transport = Arc::new(FakeTransport::default());
+        let textbee = TextBee {
+            transport: textbee_transport.clone(),
+            endpoint: "https://api.textbee.dev/api/v1/gateway/send-sms".into(),
+            api_key: "key".into(),
+            device_id: "device-1".into(),
+        };
+        let request =
+            to_delivery_request(&message(), &MessageId::new("m-textbee").unwrap()).unwrap();
+        textbee.send(&request).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(&textbee_transport.0.lock().unwrap()[0].body).unwrap();
+        assert_eq!(body["recipients"][0], "+639171234567");
+        assert_eq!(body["deviceId"], "device-1");
+        assert!(body.get("phone_number").is_none());
+
+        let infobip_transport = Arc::new(FakeTransport::default());
+        let infobip = Infobip {
+            transport: infobip_transport.clone(),
+            endpoint: "https://api.infobip.com/sms/3/messages".into(),
+            api_key: "key".into(),
+        };
+        infobip.send(&request).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(&infobip_transport.0.lock().unwrap()[0].body).unwrap();
+        assert_eq!(body["messages"][0]["sender"], "AEGIS");
+        assert_eq!(body["messages"][0]["content"]["text"], "hello");
+        assert!(body["messages"][0].get("from").is_none());
     }
 }

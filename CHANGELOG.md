@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Aligned the Rust SMS provider request contracts with the Ruby gem, including
+  the Infobip `sender`/`content.text` payload shape.
 - Corrected TextBee live integration payload and response handling to match its
   current API contract.
 - Fixed Mailpit live delivery handling when its successful response has no
