@@ -3,7 +3,8 @@
 Typed, provider-neutral SMS composition and provider adapters backed by
 `aegis-mesg-sender-core`.
 
-The SMS facade is currently scaffolded and is not production-ready. It remains
-in the workspace for API planning and is excluded from the initial provider
-release until the implementation plan in [IMPLEMENTATION.md](IMPLEMENTATION.md)
-is complete.
+The facade provides validated E.164 messages, GSM-7/Unicode segment rules,
+normalized receipts, and injected-transport adapters for Twilio, TextBee,
+Semaphore, and Infobip. Provider credentials and HTTP clients remain owned by
+the consuming application. Live provider sandbox fixtures and operational
+sign-off remain release prerequisites.
