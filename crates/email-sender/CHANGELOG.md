@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Mailpit success handling for ID-less HTTP 200 responses by retaining
+  the local request message ID as the correlation ID.
 - Added ignored, credential-gated live tests for Resend, Mailgun, and Mailpit.
 - Added the approved Aegis GitHub avatar to the crate README.
 - Added provider response fixtures, Mailgun replay protection, application

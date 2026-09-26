@@ -501,6 +501,7 @@ fn multipart_body(
 fn submit(
     transport: &dyn HttpTransport,
     request: HttpRequest,
+    fallback_provider_message_id: Option<&str>,
 ) -> Result<ProviderResponse, ProviderError> {
     let response = transport.send(request).map_err(|error| {
         ProviderError::new(
@@ -517,18 +518,30 @@ fn submit(
     if !(200..300).contains(&response.status) {
         return Err(provider_error(response.status, &response.body));
     }
-    let value: serde_json::Value = serde_json::from_slice(&response.body).map_err(|_| {
-        ProviderError::new(
-            ErrorKind::Internal,
-            "provider returned invalid response",
-            false,
-            false,
-        )
-    })?;
+    let value: serde_json::Value = match serde_json::from_slice(&response.body) {
+        Ok(value) => value,
+        Err(_)
+            if fallback_provider_message_id.is_some()
+                && response.body.iter().all(u8::is_ascii_whitespace) =>
+        {
+            return Ok(ProviderResponse {
+                provider_message_id: fallback_provider_message_id.unwrap_or_default().to_owned(),
+            });
+        }
+        Err(_) => {
+            return Err(ProviderError::new(
+                ErrorKind::Internal,
+                "provider returned invalid response",
+                false,
+                false,
+            ));
+        }
+    };
     let id = value
         .get("id")
         .or_else(|| value.get("message_id"))
         .and_then(serde_json::Value::as_str)
+        .or(fallback_provider_message_id)
         .ok_or_else(|| {
             ProviderError::new(
                 ErrorKind::Internal,
@@ -610,6 +623,7 @@ impl Provider for Resend {
                     )
                 })?,
             },
+            None,
         )
     }
 }
@@ -720,6 +734,7 @@ impl Provider for Mailgun {
                 ]),
                 body,
             },
+            None,
         )
     }
 }
@@ -776,6 +791,7 @@ impl Provider for Mailpit {
                     )
                 })?,
             },
+            Some(request.message.id.as_str()),
         )
     }
 }
@@ -1286,13 +1302,13 @@ mod tests {
             response: HttpResponse {
                 status: 200,
                 headers: BTreeMap::new(),
-                body: br#"{"id":"mp-1"}"#.to_vec(),
+                body: br#"{}"#.to_vec(),
             },
         });
         let adapter = Mailpit::new("http://localhost:8025", transport.clone()).unwrap();
-        adapter
-            .send(&to_delivery_request(&email(), &MessageId::new("m-1").unwrap()).unwrap())
-            .unwrap();
+        let delivery = to_delivery_request(&email(), &MessageId::new("m-1").unwrap()).unwrap();
+        let response = adapter.send(&delivery).unwrap();
+        assert_eq!(response.provider_message_id, "m-1");
         let request = &transport.requests.lock().unwrap()[0];
         assert_eq!(request.url, "http://localhost:8025/api/v1/send");
         assert_eq!(request.headers["content-type"], "application/json");
