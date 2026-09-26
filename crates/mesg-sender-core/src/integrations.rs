@@ -110,3 +110,96 @@ where
         self.sink.record(&event);
     }
 }
+
+#[cfg(all(test, feature = "redis", feature = "telemetry"))]
+mod tests {
+    use super::*;
+    use crate::{Attempt, DeliveryEventKind, DeliveryStatus};
+    use std::sync::Mutex;
+
+    struct Backend {
+        value: Mutex<Option<Vec<u8>>>,
+    }
+
+    impl RedisBackend for Backend {
+        fn get(&self, _key: &str) -> Option<Vec<u8>> {
+            self.value.lock().unwrap().clone()
+        }
+
+        fn set(&self, _key: &str, value: Vec<u8>, _ttl_ms: u64) {
+            *self.value.lock().unwrap() = Some(value);
+        }
+    }
+
+    struct Codec;
+
+    impl DeliveryCodec for Codec {
+        fn encode(&self, delivery: &Delivery) -> Vec<u8> {
+            delivery.provider.as_bytes().to_vec()
+        }
+
+        fn decode(&self, bytes: &[u8]) -> Option<Delivery> {
+            Some(Delivery {
+                message_id: MessageId::new("decoded").unwrap(),
+                provider: String::from_utf8(bytes.to_vec()).ok()?,
+                status: DeliveryStatus::Accepted,
+                provider_message_id: Some(String::from("provider-id")),
+                attempts: vec![Attempt {
+                    provider: String::from("provider"),
+                    accepted: true,
+                    error: None,
+                }],
+            })
+        }
+    }
+
+    struct Sink {
+        events: Mutex<Vec<DeliveryEvent>>,
+    }
+
+    impl TelemetrySink for Sink {
+        fn record(&self, event: &DeliveryEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+    }
+
+    fn delivery() -> Delivery {
+        Delivery {
+            message_id: MessageId::new("message").unwrap(),
+            provider: String::from("provider"),
+            status: DeliveryStatus::Accepted,
+            provider_message_id: Some(String::from("provider-id")),
+            attempts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn redis_state_store_round_trips_through_injected_backend() {
+        let backend = Arc::new(Backend {
+            value: Mutex::new(None),
+        });
+        let store = RedisStateStore::new(backend.clone(), Arc::new(Codec), "delivery", 60_000);
+        let original = delivery();
+        store.save(original.clone());
+        let loaded = store.load(&original.message_id).unwrap();
+        assert_eq!(loaded.provider, original.provider);
+        assert_eq!(loaded.message_id.as_str(), "decoded");
+    }
+
+    #[test]
+    fn telemetry_observer_forwards_redacted_events() {
+        let sink = Arc::new(Sink {
+            events: Mutex::new(Vec::new()),
+        });
+        let observer = TelemetryObserver::new(sink.clone());
+        let event = DeliveryEvent {
+            message_id: MessageId::new("message").unwrap(),
+            recipient: String::from("a***t"),
+            provider: String::from("provider"),
+            kind: DeliveryEventKind::Accepted,
+            provider_message_id: Some(String::from("provider-id")),
+        };
+        observer.observe(event.clone());
+        assert_eq!(sink.events.lock().unwrap().as_slice(), &[event]);
+    }
+}

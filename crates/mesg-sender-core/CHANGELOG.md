@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Redacted raw message bodies and provider error details from debug output.
+- Added coverage tests for the feature-gated Redis and telemetry contracts.
 - Renamed the package and crate to `aegis-mesg-sender-core` / `aegis_mesg_sender_core`,
   updated the public repository metadata, and switched the project license to
   MIT.

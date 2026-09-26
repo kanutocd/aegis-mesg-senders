@@ -29,10 +29,35 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --package aegis-mesg-sender-core --package aegis-email-sender --all-features --lcov --output-path lcov.info
+      - name: Generate coverage and enforce function, line, and region gates
+        run: >-
+          cargo +nightly llvm-cov --branch
+          --package aegis-mesg-sender-core
+          --package aegis-email-sender
+          --all-features
+          --json --output-path coverage.json
+          --fail-under-functions 80
+          --fail-under-lines 85
+          --fail-under-regions 85
+      - name: Enforce branch coverage gate
+        run: >-
+          jq -e
+          '.data[0].totals.branches.count > 0 and
+           .data[0].totals.branches.percent >= 75'
+          coverage.json
+      - name: Generate LCOV report
+        run: >-
+          cargo +nightly llvm-cov --branch
+          --package aegis-mesg-sender-core
+          --package aegis-email-sender
+          --all-features --lcov --output-path lcov.info
       - uses: actions/upload-artifact@v7
         with:
           name: rust-coverage
-          path: lcov.info
+          path: |
+            coverage.json
+            lcov.info

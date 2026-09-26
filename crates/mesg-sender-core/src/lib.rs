@@ -1283,6 +1283,40 @@ mod tests {
     }
 
     #[test]
+    fn message_metadata_and_registry_lookup_work() {
+        let message = Message::new(
+            MessageId::new("m-1").unwrap(),
+            Recipient::new("alice@example.test").unwrap(),
+            b"hello".to_vec(),
+        )
+        .unwrap()
+        .with_metadata("trace", "trace-1");
+        assert_eq!(
+            message.metadata.get("trace"),
+            Some(&String::from("trace-1"))
+        );
+
+        let registry = ProviderRegistry::new();
+        let (config, provider) = provider(
+            "provider",
+            1,
+            Ok(ProviderResponse {
+                provider_message_id: String::from("provider-id"),
+            }),
+        );
+        registry
+            .register(
+                config,
+                provider,
+                CircuitBreaker::new(CircuitConfig::default()).unwrap(),
+                HealthTracker::new(1_000),
+            )
+            .unwrap();
+        assert!(registry.contains("provider"));
+        assert!(!registry.contains("missing"));
+    }
+
+    #[test]
     fn in_memory_store_and_observer_are_safe_across_threads() {
         let state = Arc::new(InMemoryStateStore::default());
         let observer = Arc::new(InMemoryObserver::default());
