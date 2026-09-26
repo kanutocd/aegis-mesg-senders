@@ -266,9 +266,12 @@ fn provider_response(
             500..=599 => ErrorKind::Unavailable,
             _ => ErrorKind::Unknown,
         };
+        let detail = provider_error_detail(&response.body)
+            .map(|detail| format!("; {detail}"))
+            .unwrap_or_default();
         return Err(ProviderError::new(
             kind,
-            format!("{provider} returned HTTP {}", response.status),
+            format!("{provider} returned HTTP {}{detail}", response.status),
             matches!(
                 kind,
                 ErrorKind::RateLimited | ErrorKind::Timeout | ErrorKind::Unavailable
@@ -302,6 +305,27 @@ fn provider_response(
     Ok(ProviderResponse {
         provider_message_id: id.to_owned(),
     })
+}
+
+fn provider_error_detail(body: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let candidates = [
+        value.get("message"),
+        value.get("error"),
+        value.get("errorMessage"),
+        value.pointer("/data/message"),
+    ];
+    let detail = candidates
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .find(|message| {
+            !message.is_empty()
+                && message.len() <= 200
+                && message.chars().all(|character| !character.is_control())
+        })
+        .map(str::to_owned);
+    detail
 }
 
 fn json_request(

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Included safe structured provider messages in SMS HTTP error diagnostics.
 - Aligned Infobip request construction with the Ruby adapter and added
   TextBee/Infobip request-shape regression coverage.
 - Corrected TextBee live requests and response correlation to match its

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Included safe structured provider messages in SMS HTTP error diagnostics.
 - Aligned the Rust SMS provider request contracts with the Ruby gem, including
   the Infobip `sender`/`content.text` payload shape.
 - Corrected TextBee live integration payload and response handling to match its
