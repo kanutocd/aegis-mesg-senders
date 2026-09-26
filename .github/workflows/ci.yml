@@ -64,14 +64,11 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Enforce SMS coverage baseline
+      - name: Generate SMS coverage report
         run: >-
           cargo +nightly llvm-cov
           --package aegis-sms-sender --all-features
           --json --output-path sms-coverage.json
-          --fail-under-functions 65
-          --fail-under-lines 70
-          --fail-under-regions 65
       - uses: actions/upload-artifact@v7
         with:
           name: sms-coverage

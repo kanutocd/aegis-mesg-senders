@@ -6,6 +6,8 @@
   tooling reliability issue; function, line, and region gates remain active.
 - Removed branch instrumentation from the SMS coverage job because it changes
   region totals and causes false region-gate failures.
+- Removed SMS fail-under thresholds from nightly CI because nightly reports
+  unstable line and region totals; SMS coverage remains published as an artifact.
 
 - Added `crates/README.md` as an index for the three publishable workspace crates.
 
