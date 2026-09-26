@@ -1,0 +1,44 @@
+name: Release verification
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package-in-publish-order:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --all-features
+      - run: cargo package -p aegis-mesg-sender-core --allow-dirty
+      - run: cargo package -p aegis-email-sender --allow-dirty
+      - run: cargo package -p aegis-sms-sender --allow-dirty
+      - name: Explain publish order
+        run: |
+          echo 'Publish aegis-mesg-sender-core first, then email, then SMS.'
+          echo 'This workflow packages and verifies; publishing requires an explicit release operator action.'
+
+  dependency-and-policy-gates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      - uses: taiki-e/install-action@cargo-deny
+      - run: cargo audit
+      - run: cargo deny check advisories licenses bans sources
+
+  mutation:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-mutants
+      - run: cargo mutants --workspace --timeout 60 --minimum-test-timeout 5

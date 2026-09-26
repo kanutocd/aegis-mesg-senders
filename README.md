@@ -14,7 +14,7 @@ for the gateway's messaging needs.
 
 They are now maintained as reusable public crates so other Rust projects can
 share the same delivery contracts and provider integrations. For example,
-**Lunsaran**, the multi-organization resumable uploads and workflows project,
+<font size="+1">**ᜎᜓ**</font> **Lunsaran**, the multi-organization resumable uploads and workflows project,
 can use these crates without copying or reimplementing the messaging layer.
 
 The project was intentionally moved from private, application-specific code
@@ -28,9 +28,8 @@ helps avoid naming collisions with unrelated public packages.
   resilience, normalized delivery state, and safe observability.
 - [`aegis-email-sender`](crates/email-sender): typed email composition
   and provider adapters.
-- [`aegis-sms-sender`](crates/sms-sender): planned SMS facade scaffold. It is
-  included for workspace development but is not production-ready or part of
-  the initial provider release.
+- [`aegis-sms-sender`](crates/sms-sender): validated SMS facade and provider
+  adapters; release inclusion remains an explicit operational decision.
 
 ## Development
 
@@ -51,6 +50,6 @@ cargo +nightly llvm-cov --branch \
 
 Each crate remains independently publishable to crates.io.
 
-The initial release scope is the core runtime and email sender. SMS remains a
-documented scaffold until its validation, provider adapters, receipts, and
-fixture-driven tests are implemented.
+The initial release scope is still the core runtime and email sender. SMS now
+has validation, provider adapters, receipts, and fixture-style transport tests;
+live provider sandbox fixtures and operational sign-off remain prerequisites.
