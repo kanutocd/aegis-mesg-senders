@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the JSON content type header required by TextBee live sends.
 - Included safe structured provider messages in SMS HTTP error diagnostics.
 - Aligned the Rust SMS provider request contracts with the Ruby gem, including
   the Infobip `sender`/`content.text` payload shape.

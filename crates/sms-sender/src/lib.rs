@@ -438,6 +438,7 @@ impl<T: HttpTransport> Provider for TextBee<T> {
             .map_err(|_| ProviderError::invalid_request("invalid SMS payload"))?;
         let mut headers = BTreeMap::new();
         headers.insert("x-api-key".into(), self.api_key.clone());
+        headers.insert("content-type".into(), "application/json".into());
         let mut body = serde_json::json!({
             "recipients": [sms.to.as_str()],
             "message": sms.body
@@ -714,9 +715,11 @@ mod tests {
         textbee.send(&request).unwrap();
         let body: serde_json::Value =
             serde_json::from_slice(&textbee_transport.0.lock().unwrap()[0].body).unwrap();
+        let headers = &textbee_transport.0.lock().unwrap()[0].headers;
         assert_eq!(body["recipients"][0], "+639171234567");
         assert_eq!(body["deviceId"], "device-1");
         assert!(body.get("phone_number").is_none());
+        assert_eq!(headers["content-type"], "application/json");
 
         let infobip_transport = Arc::new(FakeTransport::default());
         let infobip = Infobip {

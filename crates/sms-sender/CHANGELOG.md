@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the JSON content type header required by TextBee live sends.
 - Included safe structured provider messages in SMS HTTP error diagnostics.
 - Aligned Infobip request construction with the Ruby adapter and added
   TextBee/Infobip request-shape regression coverage.
